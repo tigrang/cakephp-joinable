@@ -30,6 +30,13 @@ class JoinableBehavior extends ModelBehavior {
 	protected $_parsed;
 
 	/**
+	 * Defaults for join settings
+	 *
+	 * @var array
+	 */
+	protected $_defaults = array('type' => 'LEFT', 'conditions' => true, 'fields' => true);
+
+	/**
 	 * Parses `joins` key and replaces it with parsed one which the datasource can work with
 	 *
 	 * @param Model $Model
@@ -37,11 +44,14 @@ class JoinableBehavior extends ModelBehavior {
 	 * @return array|bool
 	 */
 	public function beforeFind(Model $Model, $query) {
-		if (isset($query['joins'])) {
-			$this->_parsed = array();
-			$query['joins'] = $this->_parseJoins($Model, $query['joins']);
+		$this->_query = $query;
+		if (!empty($query['joins'])) {
+			$joins = $query['joins'];
+			$this->_query['fields'] = isset($query['fields']) ? (array)$query['fields'] : array($Model->escapeField('*'));
+			unset($this->_query['joins']);
+			$this->_parseJoins($Model, $joins);
 		}
-		return $query;
+		return $this->_query;
 	}
 
 	/**
@@ -51,21 +61,35 @@ class JoinableBehavior extends ModelBehavior {
 	 * @param array $joins
 	 * @return array
 	 */
-	protected function _parseJoins(Model $Model, $joins) {
-		$defaults = array('type' => 'LEFT', 'conditions' => true);
-		foreach($joins as $association => $options) {
+	protected function _parseJoins(Model $Model, $joins, $defaults = array()) {
+		$ds = $Model->getDataSource();
+		$defaults = array_merge($this->_defaults, $defaults);
+		if (isset($joins['defaults'])) {
+			$defaults = array_merge($defaults, $joins['defaults']);
+			unset($joins['defaults']);
+		}
+		foreach((array)$joins as $association => $options) {
 			if (is_string($options)) {
 				$association = $options;
 				$options = array();
 			}
+			$AssociatedModel = $this->_associatedModel($Model, $association);
 			$deeperAssociations = array_diff_key($options, $defaults);
 			$options = array_merge($defaults, $options);
 			$this->_join($Model, $association, $options['conditions'], $options['type']);
+			$fields = false;
+			if ($options['fields'] === true) {
+				$fields = null;
+			} elseif (!empty($options['fields'])) {
+				$fields = $options['fields'];
+			}
+			if ($fields !== false) {
+				$this->_query['fields'] = array_merge($this->_query['fields'], $ds->fields($AssociatedModel, null, $fields));
+			}
 			if (!empty($deeperAssociations)) {
-				$this->_parseJoins($this->_associatedModel($Model, $association), $deeperAssociations);
+				$this->_parseJoins($AssociatedModel, $deeperAssociations, $defaults);
 			}
 		}
-		return $this->_parsed;
 	}
 
 	/**
@@ -138,7 +162,7 @@ class JoinableBehavior extends ModelBehavior {
 	 */
 	protected function _addJoin($table, $alias, $type, $conditions) {
 		$foreignKey = false;
-		$this->_parsed[] = compact('table', 'alias', 'type', 'foreignKey', 'conditions');
+		$this->_query['joins'][] = compact('table', 'alias', 'type', 'foreignKey', 'conditions');
 	}
 
 	/**
@@ -146,7 +170,7 @@ class JoinableBehavior extends ModelBehavior {
 	 *
 	 * @param Model $Model
 	 * @param $association
-	 * @return mixed
+	 * @return Model
 	 * @throws MissingModelException
 	 */
 	protected function _associatedModel(Model $Model, $association) {
