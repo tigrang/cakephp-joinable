@@ -70,8 +70,12 @@ class JoinableBehavior extends ModelBehavior {
 		}
 		foreach((array)$joins as $association => $options) {
 			if (is_string($options)) {
-				$association = $options;
-				$options = array();
+				if (is_numeric($association)) {
+					$association = $options;
+					$options = array();
+				} else {
+					$options = (array)$options;
+				}
 			}
 			$AssociatedModel = $this->_associatedModel($Model, $association);
 			$deeperAssociations = array_diff_key($options, $defaults);
